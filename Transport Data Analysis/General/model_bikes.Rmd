@@ -1,0 +1,800 @@
+---
+title: "Transportation Data Analysis"
+subtitle: "Chapter 1: Public Bicycles Sharing Systems"
+author: "Alberto González Paje"
+date: "`r Sys.Date()`"
+output:
+  tufte::tufte_html: default
+  tufte::tufte_handout:
+    citation_package: natbib
+    latex_engine: xelatex
+  tufte::tufte_book:
+    citation_package: natbib
+    latex_engine: xelatex
+bibliography: skeleton.bib
+link-citations: yes
+---
+
+```{r setup, include=FALSE}
+library(tufte)
+# invalidate cache when the tufte version changes
+knitr::opts_chunk$set(tidy = FALSE, cache.extra = packageVersion('tufte'))
+options(htmltools.dir.version = FALSE)
+```
+
+# Introduction to this chapter
+
+This chapter covers data analysis of public bike sharing systems around the world. It's the first of a few chapters covering different transport means, such as airplanes, busese, cars and others. The idea of this project is to apply data analysis techniques to real world data sets.
+In this first chapter I will show a full data analysis cycle, starting in gathering data and ending by creating a prediction model of public bike sharing system capacity in London city.
+
+This document is built using markdown syntax and then generated HTML code for publishing the whole on the Internet. The flow is basically splitted in three parts, gathering, storing and modeling data.
+
+# Get Public Bicicles Sharing Systems
+
+The following code is coming from get_citybik.R
+In order to gather data, I will be using CityBikes API www.citybik.es where you can access in real time to data of dozens of public bike sharing systems around the world.
+
+# 1.- Get list of all systems involved
+
+First we need to set our current working directory. Beware of changing this working directory if you happen to be working with these data by your own. 
+
+```{r echo = FALSE,message=FALSE}
+
+# 1.-GOAL: Get list of bikes systems and complete with full URL 
+
+# Load jsonlite package
+library(jsonlite)
+
+# Set working directory (Remember to change this directory on demand)
+setwd("/home/albertogonzalez/Desktop/TDA/chapters/bikes")
+```
+
+Get a list of all networks using the network endpoint. Basically I want to know which bike systems are available using this endpoint.
+
+```{r,message=FALSE}
+# Get all networks involved
+network_endpoint = "http://api.citybik.es/v2/networks"
+network_endpoint_df <- jsonlite::fromJSON(network_endpoint, simplifyDataFrame = TRUE)
+
+```
+
+Get valid data from the list of all networks and incorporate a column with the suffix URL.
+
+```{r,message=FALSE}
+# Refine endpoint output
+company_names = network_endpoint_df$networks
+company_ids = company_names$id
+company_data = company_names$location
+company_url = company_names$href
+
+# Build a suffix to endpoint
+suffix = "http://api.citybik.es"
+company_url = paste(suffix,company_names$href,sep="")
+company_df = cbind(company_ids,company_data,company_url)
+```
+
+This is the resulting table:
+
+```{r echo=FALSE}
+knitr::kable(
+  head(company_df), caption = 'A subset of company_df.'
+)
+```
+
+Export a CSV file with the previous dataframe just in case we need this information at any time.
+
+```{r,message=FALSE}
+# Export list of companies
+write.csv(company_df,file = "list_of_bikes_system_worldwide.csv",row.names = FALSE)
+```
+
+
+# 2.- Get data from all systems involved
+
+Now I am going to create a function to get data from all our systems.
+
+```{r echo=FALSE}
+knitr::kable(
+  head(company_df), caption = 'A subset of company_df.'
+)
+```
+
+I will start with one system and then apply the same function to a set of cities, although you could do it for the >400 cities included in this magnificent API.
+
+```{r,message=FALSE}
+# 2.- For each system, get data (build DB and cron job)
+
+# Build a function to read, parse and store endpoint data
+bike_input = "http://api.citybik.es/v2/networks/wroclawski-rower-miejski"
+# Read one system
+bike_input_df = jsonlite::fromJSON(bike_input, simplifyDataFrame = TRUE)
+
+bike_input_df_2 = bike_input_df$network
+bike_input_df_3 = bike_input_df_2$stations
+
+bike_df = bike_input_df_3[c(1,3:8)]
+total_slots = bike_input_df_3$extra$slots
+bike_df$total_slots = total_slots
+
+```
+
+The resulting table of capacity data in a given city:
+
+```{r echo=FALSE}
+knitr::kable(
+  head(bike_df), caption = 'A subset of bike_df.'
+)
+```
+
+You can see some of the cities included in the API.
+
+```{r,message=FALSE}
+# Get id + url
+input_array = company_df[c(1,6)]
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(input_array), caption = 'A subset of input_array.'
+)
+```
+
+I will build two arrays with key information, the city id and its API url, which are needed to build the final query.
+
+```{r echo=FALSE}
+array_id = input_array$company_ids
+array_id = as.data.frame(array_id)
+array_url = input_array$company_url
+array_url = as.data.frame(array_url)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(array_id), caption = 'A subset of array_id.'
+)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(array_url), caption = 'A subset of array_url.'
+)
+```
+
+As previously shown, let's create a function to gather data from one city, and then apply that same function to more than one city.
+
+```{r,message=FALSE}
+# Create the function for one system
+foo = function(url,id){
+  input = as.character(url)
+  read_input = jsonlite::fromJSON(input, simplifyDataFrame = TRUE)
+  input_df_2 = read_input$network
+  input_df_3 = input_df_2$stations
+  input_df = input_df_3[c(1,3:8)]
+  input_df$company_id = as.character(id)
+  return (input_df)
+}
+
+```
+
+Now it's time to test the function in one city and then to a small amouny of cities and ultimately, if you wish, to the whole array of cities.
+
+```{r,message=FALSE}
+# Test fuction for one:
+aa = array_url[2, ] 
+aa
+a = foo(aa,"wroclawski-rower-miejski")
+
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(a), caption = 'A subset of one system output.'
+)
+```
+
+The next rows are meant to apply the foo (get data from one system) function to the 452 systems available in Citybikes.
+
+```{r,message=FALSE}
+# Apply function to all the bike systems
+
+# u = array_url[1:452,]
+# i = array_id[1:452,]
+# 
+# foo_all <- lapply(u,foo,i)
+
+```
+
+So the above chunk shows the techniques to play with the API. Now I will start to get real time data of eight european cities each hour and store that data in a SQLite Database.
+
+
+# 3.- Get data from selected systems and store them in SQLite DB
+
+Using the function created before, I test first one city.
+
+```{r,message=FALSE}
+# Test one city.
+
+u = "http://api.citybik.es/v2/networks/dublinbikes"
+i = "dublin"
+
+city_ind = foo(u,i)
+```
+
+
+```{r echo=FALSE}
+knitr::kable(
+  head(city_ind), caption = 'A subset of one city_ind.'
+)
+```
+
+Then I create (just the first time) the SQLite database nd store the results for future analysis.
+
+```{r echo=FALSE, message = FALSE}
+# Create a DB (sqlite)
+library(dplyr)
+
+# Create DB & Table
+# my_db <- src_sqlite( "bikes.sqlite3", create = TRUE)   # crear DB          
+# copy_to( my_db, city_ind, "bikes_records_2", temporary = FALSE)   # crear tabla        
+
+```
+
+Set up a cron job to get and store data for the selected list of systems with the following code (see store_citybik.R)
+
+In this following code chunk you will see the case of one city (Dublin) but if you go to store_citybik.R you will see how I got data from eight different cities in the cron job.
+
+```{r echo=FALSE, message=FALSE}
+#  libraries
+library(RSQLite)
+#setwd("/home/albertogonzalez/Desktop/bestiario/Quadrigram/2016/monografias/bikes")
+
+# Open DB connection
+con <- dbConnect(SQLite(),dbname="bikes.sqlite3")
+my_db <- src_sqlite( "bikes.sqlite3", create = FALSE)
+
+
+# Function to get data
+foo = function(url,id){
+  input = as.character(url)
+  read_input = jsonlite::fromJSON(input, simplifyDataFrame = TRUE)
+  input_df_2 = read_input$network
+  input_df_3 = input_df_2$stations
+  input_df = input_df_3[c(1,3:8)]
+  input_df$company_id = as.character(id)
+  return (input_df)
+}
+
+
+# DUBLIN
+u = "http://api.citybik.es/v2/networks/dublinbikes"
+i = "dublin"
+
+city_ind = foo(u,i)
+dim(city_ind)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(city_ind), caption = 'A subset of one city_ind.'
+)
+```
+
+Once you got data, you need to insert it into the database.
+
+```{r echo=FALSE}
+# Append rows to DB:
+db_insert_into( con = my_db$con, table = "bikes_records_2", values = city_ind) # append rows
+
+```
+
+
+# 4.- Read DB and Model
+
+The final part of this process is coming from model_bikes.R
+I have been gathering data from those eight cities for a couple of months, therefore I have a rich dataset which in reality is a bunch of datasets that can be used to apply data analysis to any of those european cities.
+
+
+## 4.1.- Read DB
+
+```{r echo = FALSE,message=FALSE}
+library(jsonlite)
+library(RSQLite)
+library(lubridate)
+library(tidyr)
+library(ggmap)
+library(ggthemes)
+library(dplyr)
+
+#setwd("/home/albertogonzalez/Desktop/bestiario/Quadrigram/2016/monografias/bikes")
+```
+
+The first thing to do is to connect to the database where I stored data and get it all.
+
+```{r ,message=FALSE}
+# Open connection
+con <- dbConnect(SQLite(),dbname="bikes.sqlite3")
+my_db <- src_sqlite( "bikes.sqlite3", create = FALSE)
+
+# Get all data
+all_data = dbGetQuery(con,"SELECT * FROM bikes_records_2")
+str(all_data)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(all_data), caption = 'A subset of all_data.'
+)
+```
+
+Let's apply some time transformations. 
+
+```{r}
+# Insert dates columns
+#all_data$timestamp = as.Date(all_data$timestamp)
+all_data$time_2 = ymd_hms(all_data$timestamp)
+all_data$week_day = wday(all_data$time_2,label = TRUE)
+all_data$hour = hour(all_data$time_2)
+all_data$shift = cut(all_data$hour,c(0,7,15,23),c("night","morning","afternoon"))
+
+```
+
+
+```{r echo=FALSE}
+knitr::kable(
+  head(all_data), caption = 'A subset of all_data.'
+)
+```
+
+We can define a capacity status in terms of how many bikes are being used in a given station. We define a station as overflow when there is few empty slots to park. As far as I have seen is other similar analysis, thresholds to score a station as overflow, balanced or shortage are subjective. In this analysis, stations with empty slots from 0% to 25% are scored as overflow. Stations with empty slots from 75% to 100% are scored as shortage and everything in between is balanced.
+
+```{r}
+# Total slots ans shifts calculations
+all_data$total_slots = all_data$empty_slots + all_data$free_bikes
+
+all_data$empty_status = (all_data$empty_slots / all_data$total_slots) * 100
+all_data$empty_status_label = cut(all_data$empty_status,c(0,25,75,100),c("overflow","balanced","shortage"))
+
+all_data$empty_status_label[all_data$empty_status==0] <- "overflow"
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(all_data), caption = 'A subset of all_data.'
+)
+```
+
+Now it's time to focus on a single city, in this case, London.
+
+```{r}
+# One City
+ci = "london" # line 38 in model bikes.R
+
+ci_df = all_data %>%
+  filter(company_id == ci)
+
+dim(ci_df)
+ci_df = na.omit(ci_df)
+dim(ci_df)
+
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(ci_df), caption = 'A subset of ci_df.'
+)
+```
+
+Mean capacity by weekday, hour and station.
+
+```{r echo=FALSE}
+## Group by weekday, hour and station - mean of used_capacity
+ci_df_2 = ci_df %>%
+  group_by(week_day,hour,name) %>%
+  summarise(avg_used_capacity = mean(empty_status, na.rm=TRUE)) %>%
+  arrange(desc(avg_used_capacity))
+
+
+ci_df_ref = as.data.frame(ci_df_2)
+
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(ci_df_ref), caption = 'A subset of ci_df_ref.'
+)
+```
+
+We can apply a rank technique to get X number of stations:
+
+```{r echo=FALSE}
+# Top and bottom stations
+top_stations_weekday = ci_df_ref[c(1:250),]
+bottom_stations_weekday = tail(ci_df_ref,250)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(top_stations_weekday), caption = 'A subset of top_stations_weekday.'
+)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(bottom_stations_weekday), caption = 'A subset of bottom_stations_weekday.'
+)
+```
+
+Although it's simple to get that top and bottom used stations grouping just by station:
+
+```{r echo=FALSE}
+## Group by station - mean de used_capacity
+ci_df_3 = ci_df %>%
+  group_by(name) %>%
+  summarise(avg_used_capacity = mean(empty_status, na.rm=TRUE)) %>%
+  arrange(desc(avg_used_capacity))
+
+ci_df_3_ref = as.data.frame(ci_df_3)
+```
+
+See top and bottom used stations:
+
+```{r echo=FALSE}
+# Top and Bottom stations
+top_stations = ci_df_3_ref[c(1:10),]
+top_stations
+bottom_stations = tail(ci_df_3_ref,10)
+bottom_stations
+```
+
+If we want to have a better view, we can geocode those stations.
+
+```{r echo=FALSE}
+## Geolocate main stations
+ci_df_geo = ci_df[,c("name","latitude","longitude")] 
+ci_df_geo_uni = unique(ci_df_geo)
+
+top_stations_geo = merge(top_stations,ci_df_geo_uni,by = "name")
+bottom_stations_geo = merge(bottom_stations,ci_df_geo_uni,by = "name")
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(top_stations_geo), caption = 'A subset of top_stations_geo.'
+)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(bottom_stations_geo), caption = 'A subset of bottom_stations_geo.'
+)
+```
+
+Now that we have geocoded top and bottom stations, we can plot them in a map.
+
+```{r echo=FALSE}
+m <- get_map("London",zoom=12,maptype="terrain-lines",source="stamen")
+```
+
+```{r echo=FALSE,fig.margin = TRUE}
+ggmap(m, base_layer = ggplot(aes(x = longitude, y = latitude), data = top_stations_geo))  + geom_point(color="green") + theme_tufte() + ggtitle("Top Stations")
+```
+
+```{r echo=FALSE,fig.fullwidth = TRUE}
+ggmap(m, base_layer = ggplot(aes(x = longitude, y = latitude), data = bottom_stations_geo))  + geom_point(color="red") + theme_tufte() + ggtitle("Bottom Stations")
+```
+
+We can plot the top and bottom stations by week day.
+
+```{r echo=FALSE}
+top_stations_weekday_geo = merge(top_stations_weekday,ci_df_geo_uni,by = "name")
+bottom_stations_weekday_geo = merge(bottom_stations_weekday,ci_df_geo_uni,by = "name")
+```
+```{r echo=FALSE,fig.fullwidth = TRUE}
+ggmap(m, base_layer = ggplot(aes(x = longitude, y = latitude), data = top_stations_weekday_geo))  + facet_grid(week_day ~ hour) + geom_point(color="green") + theme_tufte()  + ggtitle("Top Stations by weekday and hour")
+```
+
+  
+```{r echo=FALSE,fig.fullwidth = TRUE}
+ggmap(m, base_layer = ggplot(aes(x = longitude, y = latitude), data = bottom_stations_weekday_geo))  + facet_grid(week_day ~ hour) + geom_point(color="red") + theme_tufte() + ggtitle("Bottom Stations by weekday and hour")
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(ci_df_3), caption = 'A subset of ci_df_3.'
+)
+```
+
+
+```{r echo=FALSE}
+ci_df_3_geo = merge(ci_df_3,ci_df_geo_uni,by = "name")
+colnames(ci_df_3_geo) = c("name","avgcapacity","latitude","longitude")
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(ci_df_3_geo), caption = 'A subset of ci_df_3_geo.'
+)
+```
+
+```{r echo=FALSE,fig.fullwidth = TRUE}
+t2 = ggmap(m,extent = "panel") + geom_point(data=ci_df_3_geo,aes(longitude,latitude,size = avgcapacity,alpha = 0.1)) + theme_tufte()
+t2
+```
+
+Adding up the empty slots of stations can give us a good proxy of total bikes being used.
+
+```{r echo=FALSE}
+## Number of total bikes being used
+circulando = ci_df %>%
+  group_by(hour) %>%
+  summarise(bicis_circulando = sum(empty_slots, na.rm=TRUE)) %>%
+  arrange(desc(bicis_circulando))
+
+circulando_df = as.data.frame(circulando)
+circulando_df$city = ci
+head(circulando_df)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(circulando_df), caption = 'A subset of circulando_df.'
+)
+```
+
+And then we can plot it.
+
+```{r echo=FALSE,fig.fullwidth = TRUE}
+cir_plot = ggplot(circulando_df,aes(as.factor(hour),bicis_circulando)) + geom_point() + theme_tufte() + ggtitle("Total Bikes in movement by hour")
+cir_plot 
+```
+
+We can also incorporate population data.
+
+```{r echo=FALSE}
+# Incorporación de las poblaciones en las ciudades
+# lista de ciudades
+cities = as.data.frame(unique(all_data$company_id))
+str(cities)
+names(cities) = c("city")
+cities_pop = as.data.frame(c(553165,630752,1604555,14025646,1347707,2249975,8673713,1759407))
+names(cities_pop) = "population"
+cities_df = cbind(cities,cities_pop)
+head(cities_df)
+```
+
+```{r echo=FALSE,fig.fullwidth = TRUE}
+ggplot(cities_df,aes(city,population)) + geom_point() + theme_tufte()
+```
+
+
+
+```{r echo=FALSE}
+knitr::kable(
+  ci, caption = 'A subset of ci.'
+)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(cities_df), caption = 'A subset of circulando_df.'
+)
+```
+
+And add a per_mil_capita metric.
+
+```{r echo=FALSE}
+cities_df_pop = merge(circulando_df,cities_df,by = "city",all.y = FALSE)
+cities_df_pop$popu_mil = cities_df_pop$population/1000
+cities_df_pop$per_mil_capita = cities_df_pop$bicis_circulando / cities_df_pop$popu_mil
+```
+
+
+```{r echo=FALSE}
+knitr::kable(
+  head(cities_df_pop), caption = 'A subset of cities_df_pop.'
+)
+```
+
+```{r echo=FALSE,fig.fullwidth = TRUE}
+ggplot(cities_df_pop,aes(hour,per_mil_capita)) + geom_point() + theme_tufte() + ggtitle("Bikes per mil capita and hour")
+```
+
+
+
+```{r echo=FALSE}
+# Average capacity used per hour
+ave_per_hour = ci_df %>%
+  group_by(hour) %>%
+  summarise(ave_cap_h = mean(empty_status,na.rm = TRUE)) %>%
+  arrange(desc(ave_cap_h))
+
+ave_per_hour = as.data.frame(ave_per_hour)
+cities_df_ave = merge(cities_df_pop,ave_per_hour,by = "hour")
+```
+
+Let's plot bikes per mil capita vs average used capacity.
+
+```{r echo=FALSE,fig.fullwidth = TRUE}
+ggplot(cities_df_ave,aes(ave_cap_h,per_mil_capita)) + geom_point() + geom_smooth(method = lm) + theme_tufte() + ggtitle("Bikes per mil capita and Average used capacity")
+```
+
+# Summary
+
+```{r echo=FALSE}
+knitr::kable(
+  cities_df_ave, caption = 'A subset of cities_df_ave.'
+)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  top_stations_geo, caption = 'A subset of top_stations_geo.'
+)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  bottom_stations_geo, caption = 'A subset of bottom_stations_geo.'
+)
+```
+
+
+```{r echo=FALSE}
+knitr::kable(
+  head(ci_df), caption = 'A subset of ci_df.'
+)
+```
+
+
+# Prediction Model
+
+After a succint analysis, it's time to create our prediction model. The goal is to predict a station status (overflow, balanced or shortage) in a given week day and hour.
+
+```{r echo=FALSE}
+df1 = ci_df[c("empty_slots","free_bikes","latitude","longitude","hour","empty_status","empty_status_label","id","name","shift","week_day")]
+
+df1$empty_status = as.integer(df1$empty_status)
+df1 = na.omit(df1)
+str(df1)
+dim(df1)
+```
+
+Now I will normalize data so it can fit in a prediction model.
+
+```{r echo=FALSE}
+# overflow table
+table(df1$empty_status_label)
+
+# normalize function
+normalize = function(x){
+  return ((x - min(x))/ (max(x) - min(x)))
+}
+
+df1_norm = as.data.frame(lapply(df1[1:5], normalize))
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(df1_norm), caption = 'A subset of df1_norm.'
+)
+```
+
+Basically the model will classify a station depending on the number of free slots, number of available bikes, latitude, longitude and hour of the day. Split the dataset in two sets, 70% for training and 30% for testing. 
+
+```{r echo=FALSE}
+# Split & model
+n = nrow(df1_norm)
+
+train = sample(1:n, size = round(0.7*n), replace=FALSE)
+
+df1_norm_train = df1_norm[train,]
+dim(df1_norm_train)
+
+df1_norm_test = df1_norm[-train,]
+dim(df1_norm_test)
+
+df1_train_labels = df1$empty_status_label[train]
+df1_test_labels = df1$empty_status_label[-train]
+```
+
+Let's train and test the model. I will use knn with k = 21.
+
+```{r echo=FALSE}
+# Training the model
+library(class)
+library(gmodels)
+
+# df1_test_pred = knn(df1_norm_train,df1_norm_test,cl = df1_train_labels, k = 3)
+# CrossTable(df1_test_labels,df1_test_pred)
+
+df1_test_pred_2 = knn(df1_norm_train,df1_norm_test,cl = df1_train_labels, k = 21)
+CrossTable(df1_test_labels,df1_test_pred_2)
+
+
+df1_test = df1[-train,]
+df1_test$label_pred = df1_test_pred_2
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(df1_test), caption = 'A subset of df1_test.'
+)
+```
+
+As you can see in the previous table, the model predicts quite well.
+
+```{r echo=FALSE}
+table(df1_test$empty_status_label,df1_test$label_pred)
+```
+
+```{r echo=FALSE}
+df1_test$pred = ifelse(df1_test$empty_status_label==df1_test$label_pred,1,0)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(df1_test), caption = 'A subset of df1_test.'
+)
+```
+
+  
+```{r echo=FALSE}
+df1_test_wrong = df1_test[df1_test$pred == 0, ]
+dim(df1_test_wrong)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  head(df1_test_wrong), caption = 'A subset of df1_test_wrong.'
+)
+```
+
+Finally we can create a simple tool to search a given station and see its real and predicted status in a given day and hour.
+
+```{r echo=FALSE}
+# Generate a vector with the ID/Names list
+places = unique(df1_test$id)
+length(places)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  places[1:10], caption = 'A subset of places.'
+)
+```
+
+
+
+```{r echo=FALSE}
+places_names = unique(df1_test$name)
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  places_names[1:10], caption = 'A subset of places_names.'
+)
+```
+
+
+```{r echo=FALSE}
+input_place = "003424 - Broadcasting House, Marylebone"
+input_hour = 11
+input_weekday = "Mon"
+
+selected_place = filter(df1_test,name == input_place & hour == input_hour & week_day == input_weekday)
+
+table(selected_place$empty_status_label,selected_place$label_pred)
+
+```
+
+```{r echo=FALSE}
+knitr::kable(
+  selected_place, caption = 'A subset of selected_place.'
+)
+```
+
+
+```{r bib, include=FALSE}
+# create a bib file for the R packages used in this document
+knitr::write_bib(c('base', 'rmarkdown'), file = 'skeleton.bib')
+```
