@@ -1,0 +1,437 @@
+---
+title: "Transportation Analysis | Passenger Commercial Flights"
+author: "Alberto González Paje"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Unfortunately there is few places where to download and work with flights data. The only place I know is openflights.org, where you can doownload their example dataset and work with it. There is no free alternative as far as I know.
+
+
+# Get data
+
+There is three files to work with. Airlines, airports and routes.
+
+```{r }
+# Set wd
+setwd("/home/albertogonzalez/Desktop/TDA/chapters/flights")
+
+#Input data
+airlines = read.csv("airlines.dat.txt",header = FALSE)
+
+colnames(airlines) = c("id_air","name_air","alias_air","iata_air","icao_air","callsign_air","country_air","active_air")
+
+head(airlines)
+
+
+airports = read.csv("airports.dat.txt",header = FALSE)
+
+colnames(airports) = c("id_port","name_port","city_port","country_port","iata_port","icao_port","lat_port","lon_port","alt_port","time_port","dst_port","timezone_port")
+
+head(airports)
+
+
+routes = read.csv("routes.dat.txt",header = FALSE)
+
+colnames(routes) = c("name_air","id_air","name_air_orig","id_air_orig","name_air_dest","id_air_dest","codeshare","stops","equipment")
+
+head(routes)
+
+
+```
+
+# Prepare data
+
+Now I am going to merge the files so that we have a richer dataset.
+
+
+```{r }
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+airport_geo = airports[c("iata_port","lat_port","lon_port")]
+head(airport_geo)
+
+head(routes)
+
+m1 = merge(routes,airport_geo,by.x ="name_air_orig",by.y = "iata_port")
+
+
+colnames(m1) = c("name_air_orig", "name_air", "id_air", "id_air_orig", "name_air_dest","id_air_dest", "codeshare", "stops", "equipment", "lat_port_orig","lon_port_orig")
+
+head(m1)
+
+m2 = merge(m1,airport_geo,by.x ="name_air_dest",by.y = "iata_port")
+
+
+colnames(m2) = c("name_air_dest","name_air_orig", "name_air", "id_air", "id_air_orig","id_air_dest", "codeshare", "stops", "equipment", "lat_port_orig","lon_port_orig","lat_port_dest","lon_port_dest")
+
+head(m2)
+
+```
+
+# Routes flows
+
+One of the first visual analysis should be in terms of routes. Let's plot all possible routes.Then, we can filter routes from a single airline and plot them.
+
+```{r}
+library(maps)
+library(geosphere)
+
+
+airlines_names = as.data.frame(table(m2$name_air)) %>%
+  arrange(desc(Freq))
+
+head(airlines_names,20)
+
+
+#plot routes
+head(routes)
+head(airports)
+head(m2)
+
+orig = as.matrix(m2[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m2[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+
+lines(i, col="black", lwd=0.1)
+
+# filter by airline
+head(airlines_names,20)
+
+input_airline = "LH"
+
+m3 = m2 %>%
+  filter(name_air==input_airline)
+
+orig = as.matrix(m3[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m3[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+
+lines(i, col="red", lwd=0.1)
+
+
+```
+
+
+# Networks
+
+We can consider airports as nodes and routes as relations amongst those nodes. Threfore we can work with those data in terms of a network. 
+We calculate centrality metrics such as degree, betweenness and closeness and plot the top nodes according to the calculated metrics.
+
+```{r}
+library(igraph)
+#library(Rgraphviz)
+
+head(m2)
+
+input_pair = m2[c("name_air_orig","name_air_dest")]
+input_pair$count = 1
+head(input_pair)
+
+
+ne = graph.data.frame(input_pair)
+
+
+# DEGREE (celebrities)
+de = degree(ne)
+
+summary(de)
+
+top_in = as.data.frame(de)
+str(top_in)
+airport = row.names(top_in)
+top_in = cbind(airport,top_in)
+head(top_in)
+
+top_in_ord = top_in %>%
+  arrange(desc(de))
+
+head(top_in_ord,20)
+
+top_in_20 = top_in_ord[1]
+top_in_20 = head(top_in_20,3)
+top_in_20 = top_in_20$airport
+
+head(m2)
+
+m4 = m2 %>%
+  filter(name_air_orig %in% top_in_20 | name_air_dest %in% top_in_20)
+
+orig = as.matrix(m4[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m4[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+lines(i, col="red", lwd=0.1)
+
+
+# plot degree top 20 airlines routes
+
+foo = function(i){
+  fi = m2 %>% filter(name_air_orig %in% i | name_air_dest %in% i)
+orig = as.matrix(fi[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(fi[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+ii = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+lines(ii, col="red", lwd=0.1)
+i
+}
+
+#head(top_in_ord,20)
+
+foo("ATL")
+
+inp = head(top_in_ord,20) 
+input_list = inp$airport
+
+
+foo_all = lapply(input_list,foo)
+foo_all
+
+
+
+# CLOSENESS (gossip - ability to receive and send information)
+network_object = graph.data.frame(input_pair)
+summary(network_object)
+class(network_object)
+
+clo = closeness(network_object)
+summary(clo)
+c = clo[1:20]
+
+top_clo = as.data.frame(c)
+
+airport = row.names(top_clo)
+top_clo = cbind(airport,top_clo)
+head(top_clo)
+
+top_clo_ord = top_clo %>%
+  arrange(desc(c))
+
+top_clo_20 = top_clo_ord[1]
+top_clo_20 = head(top_clo_20,10)
+top_clo_20 = top_clo_20$airport
+
+head(m2)
+
+m5 = m2 %>%
+  filter(name_air_orig %in% top_clo_20 | name_air_dest %in% top_clo_20)
+
+orig = as.matrix(m5[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m5[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+lines(i, col="red", lwd=0.1)
+
+
+##plot 10 top airports by closeness
+input_list_clo = top_clo_20
+foo_all_clo = lapply(input_list_clo,foo)
+foo_all_clo
+
+
+
+
+# BETWEENEESS (bottlenecks and comunity bridges)
+bet = betweenness(network_object)
+b = bet[1:20]
+length(bet)
+
+b
+
+
+top_bet = as.data.frame(b)
+
+airport = row.names(top_bet)
+top_bet = cbind(airport,top_bet)
+head(top_bet)
+
+top_bet_ord = top_bet %>%
+  arrange(desc(b))
+
+top_bet_20 = top_bet_ord[1]
+top_bet_20 = head(top_bet_20,10)
+top_bet_20 = top_bet_20$airport
+
+head(top_bet_ord)
+
+head(m2)
+
+m6 = m2 %>%
+  filter(name_air_orig %in% top_bet_20 | name_air_dest %in% top_bet_20)
+
+orig = as.matrix(m6[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m6[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+lines(i, col="red", lwd=0.1)
+
+##plot 10 top airports by betweeneess
+input_list_bet = top_bet_20
+foo_all_bet = lapply(input_list_bet,foo)
+foo_all_bet
+
+
+
+```
+
+
+# Clusters
+
+Finally we can apply cluster analysis. We will first calculate the number of optimal clusters and then apply that input to a k-means algo.
+
+```{r}
+
+ne
+head(m2)
+
+
+# cluster airports by position
+air_po = m2[c("name_air_orig","lat_port_orig","lon_port_orig")]
+head(air_po)
+dim(air_po)
+
+air_po_u = unique(air_po)
+dim(air_po_u)
+head(air_po_u)
+
+plot(air_po_u$lon_port_orig,air_po_u$lat_port_orig)
+
+mydata = air_po_u[2:3]
+
+wss <- (nrow(mydata)-1)*sum(apply(mydata,2,var))
+  for (i in 2:15) wss[i] <- sum(kmeans(mydata,
+                                       centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+     ylab="Within groups sum of squares")
+
+
+library(fpc)
+pamk.best <- pamk(mydata)
+
+summary(pamk.best)
+
+cat("number of clusters estimated by optimum average silhouette width:", pamk.best$nc, "\n")
+
+
+clus = kmeans(mydata,2)
+clus_id = as.data.frame(clus$cluster)
+dim(clus_id)
+
+clus_df = cbind(air_po_u,clus_id)
+
+colnames(clus_df) = c("air","lat","lon","clu")
+head(clus_df,20)
+
+
+#plot cluster routes
+clu_1 = clus_df %>%
+  filter(clu==1)
+
+head(clu_1)
+
+clu_1_names = clu_1$air
+head(clu_1_names)
+
+head(m2)
+
+m7 = m2 %>%
+  filter(name_air_orig %in% clu_1_names)
+
+head(m7)
+
+orig = as.matrix(m7[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m7[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+lines(i, col="red", lwd=0.1)
+
+
+clu_2 = clus_df %>%
+  filter(clu==2)
+
+head(clu_2)
+
+clu_2_names = clu_2$air
+head(clu_2_names)
+
+head(m2)
+
+m8 = m2 %>%
+  filter(name_air_orig %in% clu_2_names)
+
+head(m8)
+
+orig = as.matrix(m8[c("lon_port_orig","lat_port_orig")])
+dest = as.matrix(m8[c("lon_port_dest","lat_port_dest")])
+
+inter = gcIntermediate(orig,dest)
+
+i = do.call("rbind", inter)
+
+map("world", col="#f2f2f2", fill=TRUE, bg="white", lwd=0.05)
+lines(i, col="red", lwd=0.1)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
