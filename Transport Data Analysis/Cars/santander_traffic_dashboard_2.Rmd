@@ -1,0 +1,316 @@
+---
+title: "Trafico Santander"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: bootstrap
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+```
+
+
+```{r echo=FALSE, results='hide',message=FALSE}
+#################### Connect to DB ####################
+library(RSQLite)
+library(rgdal)
+setwd("/home/albertogonzalez/Desktop/TDA/chapters/cars")
+con <- dbConnect(SQLite(),dbname="santander.sqlite3")
+dbListTables(con)
+
+traffic_data = dbGetQuery(con,"SELECT * FROM mediciones")
+head(traffic_data)
+dim(traffic_data)
+
+#################### Get Espiras Data (GEO) ####################
+setwd("/home/albertogonzalez/Desktop/TDA/chapters/cars")
+espiras <- readOGR(dsn = "espiras_shp", layer = "Espiras")
+sensor_coord = espiras@coords
+sensor_df = as.data.frame(sensor_coord)
+
+library(proj4)
+proj4string <- "+proj=utm +zone=30 +north +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+
+xy <- sensor_df[1:2]
+pj <- project(xy, proj4string, inverse=TRUE)
+latlon <- data.frame(lat=pj$y, lon=pj$x)
+
+sensor_geo = cbind(sensor_df,latlon)
+sensor_geo_df = cbind(sensor_geo,espiras@data)
+str(sensor_geo_df)
+
+library(stringr)
+sensor_geo_df$RefName = gsub("\\D","",sensor_geo_df$RefName)
+head(sensor_geo_df)
+
+sensor_geo_df_ref = sensor_geo_df[c("RefName","lon","lat","Elevation")]
+head(sensor_geo_df_ref)
+names(sensor_geo_df_ref) = c("id","lon","lat","elevation")
+
+head(traffic_data)
+names(traffic_data) = c("ocu","id","inten","timestamp","dc_id","carga")
+
+trafic_df = merge(traffic_data,sensor_geo_df_ref)
+head(trafic_df)
+dim(trafic_df)
+
+#################### Dates ####################
+library(lubridate)
+trafic_df$ymd_hms = ymd_hms(trafic_df$timestamp)
+trafic_df$day_month = day(trafic_df$ymd_hms)
+trafic_df$month = month(trafic_df$ymd_hms)
+trafic_df$year = year(trafic_df$ymd_hms)
+trafic_df$wday = wday(trafic_df$ymd_hms,label = TRUE)
+trafic_df$hour = hour(trafic_df$ymd_hms)
+trafic_df$minutes = minute(trafic_df$ymd_hms)
+
+head(trafic_df)
+dim(trafic_df)
+
+#############################################################
+
+# For Dashboard #
+
+# 1.- Unique sensors
+uni_sensors = length(unique(trafic_df$id))
+
+# 2.- Rango Temporal
+init_date = min(trafic_df$ymd_hms) 
+last_date = max(trafic_df$ymd_hms)
+
+# 3.- Ocupacion, Intensidad y Carga Media
+library(dplyr)
+# Carga (intensidad / ocupacion = estimacion grado congestion)
+mean_carga = trafic_df %>%
+  group_by(id) %>%
+  summarise(avg_carga = mean(as.numeric(carga), na.rm=TRUE)) %>%
+  arrange(desc(avg_carga))
+
+head(mean_carga)
+
+mean_carga_tot = mean(mean_carga$avg_carga) 
+
+# Ocupacion (% de tiempo que el vehiculo ocupa la espira)
+mean_ocu = trafic_df %>%
+  group_by(id) %>%
+  summarise(avg_ocu = mean(as.numeric(ocu), na.rm=TRUE)) %>%
+  arrange(desc(avg_ocu))
+
+head(mean_ocu)
+
+mean_ocu_tot = mean(mean_ocu$avg_ocu) 
+
+# Intensidad (numero de vehiculos por hora)
+mean_inten = trafic_df %>%
+  group_by(id) %>%
+  summarise(avg_inten = mean(as.numeric(inten), na.rm=TRUE)) %>%
+  arrange(desc(avg_inten))
+
+head(mean_inten)
+
+mean_inten_tot = mean(mean_inten$avg_inten) 
+
+
+# 4.- Scatters de Carga, Intensidad y Ocupacion
+mean_tot = merge(mean_carga,mean_ocu,by = "id")
+mean_tot = merge(mean_tot,mean_inten,by = "id")
+head(mean_tot)
+
+# Get id lon/lat
+head(trafic_df)
+id_cor = trafic_df[, c("id","lon","lat")]
+id_cor_def = unique(id_cor)
+
+# merge with lon/lat
+map_df = merge(mean_tot,id_cor_def,all.x=TRUE)
+
+
+
+
+# 5.- Scatters de Carga, Intensidad y Ocupacion X Dia de Semana
+trafic_df_lite = trafic_df[c("id","wday","carga","ocu","inten")]
+trafic_df_lite$carga = as.numeric(trafic_df_lite$carga)
+trafic_df_lite$ocu = as.numeric(trafic_df_lite$ocu)
+trafic_df_lite$inten = as.numeric(trafic_df_lite$inten)
+
+
+mean_carga_wday = trafic_df_lite %>%
+  group_by(id,wday) %>%
+  summarise_each(funs(mean))
+  
+
+head(mean_carga_wday)
+
+
+# 6.- Scatters de Carga, Intensidad y Ocupacion X Hora
+trafic_df_lite_2 = trafic_df[c("id","hour","carga","ocu","inten")]
+trafic_df_lite_2$carga = as.numeric(trafic_df_lite$carga)
+trafic_df_lite_2$ocu = as.numeric(trafic_df_lite$ocu)
+trafic_df_lite_2$inten = as.numeric(trafic_df_lite$inten)
+
+
+mean_carga_hour = trafic_df_lite_2 %>%
+  group_by(id,hour) %>%
+  summarise_each(funs(mean))
+  
+
+head(mean_carga_hour)
+
+
+# Filter standard hours
+# standard_hours = mean_carga_hour %>%
+#   filter(hour > 6 & hour < 20)
+
+
+# Last point for the maps now
+# sort by day, calculate N unique ids and select the n next
+uni_sensors
+
+last_df = trafic_df[order(as.Date(trafic_df$ymd_hms, format="%d/%m/%Y %H:%M:%S")),]
+
+last_df_2 = tail(last_df,uni_sensors)
+last_df_3 = last_df_2[c("id","ocu","inten","carga","lon","lat")]
+
+
+# 7.- Heatmap de Carga
+library("KernSmooth")
+# head(mean_tot)
+# geo_id = trafic_df[c("id","lon","lat")]
+#
+#heat_df = merge(mean_tot,geo_id,by = "id",all.y = FALSE)
+#heat_df_uni = unique(heat_df)
+
+kde <- bkde2D(map_df[ , c("lon", "lat")],
+               bandwidth=c(.0045, .0068), gridsize = c(100,100))
+CL <- contourLines(kde$x1 , kde$x2 , kde$fhat)
+#
+LEVS <- as.factor(sapply(CL, `[[`, "level"))
+NLEV <- length(levels(LEVS))
+
+pgons <- lapply(1:length(CL), function(i)
+     Polygons(list(Polygon(cbind(CL[[i]]$x, CL[[i]]$y))), ID=i))
+spgons = SpatialPolygons(pgons)
+
+
+
+
+
+
+```
+
+
+
+Medidas
+===================================== 
+
+Column {data-height=250}
+-------------------------------------
+
+### Sensores
+
+```{r}
+sensores <- uni_sensors
+valueBox(sensores)
+```
+
+
+### Fecha Inicial
+
+```{r}
+first_day <- init_date
+valueBox(first_day)
+```
+
+
+### Fecha Final
+
+```{r}
+last_day <- last_date
+valueBox(last_day)
+```
+
+### Carga Total Media (intensidad / ocupacion = estimacion grado congestion)
+
+```{r}
+carga_tot <- mean_carga_tot
+valueBox(carga_tot)
+```
+
+
+### Ocupacion Total Media (% de tiempo que el vehiculo ocupa la espira)
+
+```{r}
+ocu_tot <- mean_ocu_tot
+valueBox(ocu_tot)
+```
+
+### Intensidad Total Media (numero de vehiculos por hora)
+
+```{r}
+inten_tot <- mean_inten_tot
+valueBox(inten_tot)
+```
+
+
+
+Column {data-height=850}
+-------------------------------------
+
+
+### X = Ocupacion | Y = Carga | Z = Intensidad
+
+```{r}
+library(plotly)
+plot_ly(mean_tot, x = ~avg_ocu, y = ~avg_carga,
+        mode = "markers", size = ~avg_inten)
+```
+
+
+
+
+Carga
+===================================== 
+
+Column
+-------------------------------------
+
+### Carga
+
+```{r}
+library(leaflet)
+leaflet(spgons) %>% addTiles() %>% 
+  addProviderTiles("Hydda.Full") %>%
+    #addPolygons(color = heat.colors(NLEV, NULL)[LEVS]) %>%
+  addCircles(lng = map_df$lon, lat = map_df$lat,radius = map_df$avg_carga, opacity = .8, col = "orange") 
+  
+```
+
+
+Ocupacion
+===================================== 
+
+Column
+-------------------------------------
+
+### Ocupacion
+
+```{r}
+library(leaflet)
+leaflet(spgons) %>% addTiles() %>% 
+  addProviderTiles("Hydda.Full") %>%
+    #addPolygons(color = heat.colors(NLEV, NULL)[LEVS]) %>%
+  addCircles(lng = map_df$lon, lat = map_df$lat,radius = map_df$avg_ocu, opacity = .8, col = "green") 
+  
+```
+
+
+
+
+
+
+
+
+
+
